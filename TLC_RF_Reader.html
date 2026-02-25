@@ -1,0 +1,1581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TLC RF Reader</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html {
+    scrollbar-width: none;        /* Firefox */
+  }
+  html::-webkit-scrollbar {
+    display: none;                /* Chrome / Safari / Edge */
+  }
+
+  body {
+    background: #0a0e1a;
+    color: #c8d8e8;
+    font-family: 'Rajdhani', sans-serif;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ──────────────────────────────────────── */
+  #header {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 300;
+    background: linear-gradient(90deg, #0d1b2a 0%, #1a2744 50%, #0d1b2a 100%);
+    border-bottom: 1px solid #2a4a6a;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    height: 44px;
+  }
+  #header h1 {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 1.1rem;
+    color: #4af;
+    letter-spacing: 2px;
+    text-shadow: 0 0 10px #4af8;
+    white-space: nowrap;
+  }
+  #openBtn {
+    background: linear-gradient(135deg, #1a3a5c, #0d2a4a);
+    border: 1px solid #4af;
+    color: #4af;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    padding: 4px 12px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  #openBtn:hover { background: #4af; color: #0a0e1a; }
+  #resetBtn {
+    background: linear-gradient(135deg, #3a1a1a, #2a0d0d);
+    border: 1px solid #f64;
+    color: #f64;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.75rem;
+    padding: 4px 12px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    white-space: nowrap;
+    display: none;
+  }
+  #resetBtn:hover { background: #f64; color: #0a0e1a; }
+  #fileInput { display: none; }
+  #statusBar {
+    margin-left: auto;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.7rem;
+    color: #8ab;
+    letter-spacing: 1px;
+    white-space: nowrap;
+  }
+  #keyHints {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.65rem;
+    color: #ffffff;
+    white-space: nowrap;
+  }
+
+  /* ── Scrollable image area ───────────────────────── */
+  #mainArea {
+    margin-top: 44px;
+    padding-bottom: calc(100vh / 3);
+    position: relative;
+    width: 100%;
+  }
+  #imageContainer {
+    position: relative;
+    width: 100%;
+    line-height: 0;
+  }
+  #tlcCanvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  /* Marker overlay scrolls with image, no pointer events */
+  #markerOverlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  /* ── Crosshair canvas: fixed, full height below header ── */
+  /* z-index 210 = above plotArea (200) so crosshair draws over plot */
+  /* pointer-events: none — hitArea handles mouse */
+  #crosshairCanvas {
+    position: fixed;
+    top: 44px; left: 0;
+    z-index: 210;
+    pointer-events: none;
+  }
+
+  /* ── Hit area: fixed, only covers image viewport (above plot) ── */
+  /* Captures mouse for clicking & crosshair tracking */
+  #hitArea {
+    position: fixed;
+    top: 44px; left: 0; right: 0;
+    z-index: 220;
+    cursor: crosshair;
+    background: transparent;
+    /* height set by JS to viewport minus plot panel */
+  }
+
+  /* ── Fixed plot panel ────────────────────────────── */
+  #plotArea {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: calc(100vh / 3);
+    background: rgb(255, 251, 240);
+    border-top: 2px solid #2a4a6a;
+    z-index: 200;
+  }
+  #plotCanvas { display: block; width: 100%; height: 100%; }
+
+  /* ── Text banner: sits immediately above the plot area ── */
+  #textBanner {
+    position: fixed;
+    left: 0; right: 0;
+    background: rgb(255, 251, 240);
+    border-top: 2px solid #2a4a6a;
+    z-index: 201;
+    overflow: hidden;
+  }
+  #textBannerCanvas { display: block; width: 100%; }
+
+  /* ── Drag-drop overlay ──────────────────────────────── */
+  #dropOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+    background: rgba(10, 20, 40, 0.82);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    pointer-events: none;
+  }
+  #dropOverlay.active {
+    display: flex;
+  }
+  #dropOverlay .drop-box {
+    border: 3px dashed #4af;
+    border-radius: 12px;
+    padding: 48px 64px;
+    text-align: center;
+    color: #4af;
+    font-family: 'Share Tech Mono', monospace;
+  }
+  #dropOverlay .drop-box h2 {
+    font-size: 1.6rem;
+    letter-spacing: 3px;
+    margin-bottom: 10px;
+    text-shadow: 0 0 20px #4af;
+  }
+  #dropOverlay .drop-box p {
+    font-size: 0.85rem;
+    color: #8ab;
+    letter-spacing: 1px;
+  }
+
+  /* ── No-image placeholder ────────────────────────── */
+  #noImageMsg {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -60%);
+    text-align: center;
+    font-family: 'Share Tech Mono', monospace;
+    pointer-events: none;
+    z-index: 5;
+  }
+  #noImageMsg h2 { font-size: 1.4rem; color: #4af4; margin-bottom: 8px; }
+  #noImageMsg p  { font-size: 0.8rem; color: #456; }
+
+  /* ── Text dialog modal ───────────────────────────── */
+  #textModalBackdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 600;
+    background: rgba(5, 12, 28, 0.75);
+    align-items: center;
+    justify-content: center;
+  }
+  #textModalBackdrop.active { display: flex; }
+  #textModal {
+    background: linear-gradient(160deg, #0d1b2a, #1a2744);
+    border: 1px solid #4af;
+    border-radius: 8px;
+    padding: 28px 32px;
+    min-width: 340px;
+    max-width: 520px;
+    width: 90%;
+    box-shadow: 0 0 40px #4af3;
+    font-family: 'Share Tech Mono', monospace;
+  }
+  #textModal h3 {
+    color: #4af;
+    font-size: 0.95rem;
+    letter-spacing: 2px;
+    margin-bottom: 20px;
+    text-shadow: 0 0 8px #4af6;
+  }
+  #textModal .modal-question {
+    color: #c8d8e8;
+    font-size: 0.85rem;
+    margin-bottom: 18px;
+    letter-spacing: 1px;
+  }
+  #textModal .modal-btns {
+    display: flex;
+    gap: 12px;
+  }
+  #textModal .modal-btns button {
+    flex: 1;
+    padding: 7px 0;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.8rem;
+    letter-spacing: 2px;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.18s;
+    text-transform: uppercase;
+  }
+  #textModalYes {
+    background: linear-gradient(135deg, #1a3a5c, #0d2a4a);
+    border: 1px solid #4af;
+    color: #4af;
+  }
+  #textModalYes:hover { background: #4af; color: #0a0e1a; }
+  #textModalNo {
+    background: linear-gradient(135deg, #3a1a1a, #2a0d0d);
+    border: 1px solid #f64;
+    color: #f64;
+  }
+  #textModalNo:hover { background: #f64; color: #0a0e1a; }
+  #textInputArea {
+    display: none;
+    margin-top: 18px;
+  }
+  #textInputArea textarea {
+    width: 100%;
+    min-height: 90px;
+    background: #060d1a;
+    border: 1px solid #4af7;
+    color: #c8d8e8;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.8rem;
+    padding: 8px 10px;
+    resize: vertical;
+    border-radius: 3px;
+    outline: none;
+    letter-spacing: 0.5px;
+    line-height: 1.5;
+  }
+  #textInputArea textarea:focus { border-color: #4af; box-shadow: 0 0 8px #4af4; }
+  #textInputHint {
+    margin-top: 8px;
+    font-size: 0.68rem;
+    color: #456;
+    letter-spacing: 1px;
+  }
+
+  /* ── BG type modal ───────────────────────────────── */
+  #bgModalBackdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 600;
+    background: rgba(5, 12, 28, 0.75);
+    align-items: center;
+    justify-content: center;
+  }
+  #bgModalBackdrop.active { display: flex; }
+  #bgModal {
+    background: linear-gradient(160deg, #0d1b2a, #1a2744);
+    border: 1px solid #4af;
+    border-radius: 8px;
+    padding: 28px 32px;
+    min-width: 340px;
+    max-width: 480px;
+    width: 90%;
+    box-shadow: 0 0 40px #4af3;
+    font-family: 'Share Tech Mono', monospace;
+  }
+  #bgModal h3 {
+    color: #4af;
+    font-size: 0.95rem;
+    letter-spacing: 2px;
+    margin-bottom: 20px;
+    text-shadow: 0 0 8px #4af6;
+  }
+  #bgModal .modal-question {
+    color: #c8d8e8;
+    font-size: 0.85rem;
+    margin-bottom: 18px;
+    letter-spacing: 1px;
+  }
+  #bgModal .modal-btns {
+    display: flex;
+    gap: 12px;
+  }
+  #bgModal .modal-btns button {
+    flex: 1;
+    padding: 10px 0;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 0.85rem;
+    letter-spacing: 2px;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.18s;
+    text-transform: uppercase;
+  }
+  #bgLightBtn {
+    background: linear-gradient(135deg, #3a3a1a, #2a2a0d);
+    border: 1px solid #ffd700;
+    color: #ffd700;
+  }
+  #bgLightBtn:hover { background: #ffd700; color: #0a0e1a; }
+  #bgDarkBtn {
+    background: linear-gradient(135deg, #1a1a3a, #0d0d2a);
+    border: 1px solid #88aaff;
+    color: #88aaff;
+  }
+  #bgDarkBtn:hover { background: #88aaff; color: #0a0e1a; }
+  #bgModalHint {
+    margin-top: 14px;
+    font-size: 0.65rem;
+    color: #456;
+    letter-spacing: 0.8px;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>TLC RF READER</h1>
+  <button id="openBtn" onclick="document.getElementById('fileInput').click()">⊞ OPEN IMAGE</button>
+  <input type="file" id="fileInput" accept="image/*">
+  <button id="resetBtn" onclick="resetMarkers()">↺ RESET MARKERS</button>
+  <span id="keyHints">O=Open · ←/→=Rotate · T=Add Text · R=Red · G=Green · B=Blue · I=Invert · N=Normalize · H=Set BG · L=Wider Sample · C=Export PNG · F=Force Peak · Ctrl+F=Clear Forced · Ctrl+X=Close</span>
+  <span id="statusBar">NO IMAGE LOADED</span>
+</div>
+
+<!-- Drag-drop overlay -->
+<div id="dropOverlay"><div class="drop-box"><h2>⊞ DROP IMAGE</h2><p>Release to open</p></div></div>
+
+<div id="noImageMsg">
+  <h2>TLC RF READER</h2>
+  <p>Open a TLC image to begin analysis</p>
+</div>
+
+<div id="mainArea" style="display:none;">
+  <div id="imageContainer">
+    <canvas id="tlcCanvas"></canvas>
+    <canvas id="markerOverlay"></canvas>
+  </div>
+</div>
+
+<!-- Crosshair spans full height below header (into plot) -->
+<canvas id="crosshairCanvas"></canvas>
+
+<!-- Hit area only over image zone (not plot) -->
+<div id="hitArea"></div>
+
+<!-- Text banner: appears above plot when text is committed -->
+<div id="textBanner" style="height:0; bottom:0;">
+  <canvas id="textBannerCanvas"></canvas>
+</div>
+
+<div id="plotArea">
+  <canvas id="plotCanvas"></canvas>
+</div>
+
+<!-- Text input modal -->
+<div id="textModalBackdrop">
+  <div id="textModal">
+    <h3>▸ ADD TEXT TO PLOT</h3>
+    <div class="modal-question">Would you like to add some text?</div>
+    <div class="modal-btns">
+      <button id="textModalYes">Yes &nbsp;[Y]</button>
+      <button id="textModalNo">No &nbsp;[N]</button>
+    </div>
+    <div id="textInputArea">
+      <textarea id="plotTextInput" placeholder="Type your text here…"></textarea>
+      <div id="textInputHint">Ctrl+Enter to render · Text appears above the plot area</div>
+    </div>
+  </div>
+</div>
+
+<!-- BG type modal -->
+<div id="bgModalBackdrop">
+  <div id="bgModal">
+    <h3>▸ SET BACKGROUND TYPE</h3>
+    <div class="modal-question">Is the background LIGHT or DARK?</div>
+    <div class="modal-btns">
+      <button id="bgLightBtn">☀ LIGHT</button>
+      <button id="bgDarkBtn">◑ DARK</button>
+    </div>
+    <div id="bgModalHint">Light = bright plate (UV254, silica). Dark = dark plate (spots are bright).</div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════════════════
+let rotatedCanvas  = null;
+let rotatedImgData = null;
+let displayScale   = 1;
+let sourceImg      = null;   // original Image element
+let rotationAngle  = 90;     // degrees; starts at 90° (landscape→portrait default)
+
+// Text annotation state
+let plotText       = '';     // committed text to render in plot
+let textModalState = 'closed'; // 'closed' | 'question' | 'input'
+let bannerHeight   = 0;      // current height of the text banner in px
+
+let startX = null;
+let frontX = null;
+let phase  = 0;  // 0=none · 1=set START · 2=set FRONT · 3=active
+
+// Mouse position in viewport coords (relative to hitArea top-left = 44px from top)
+let vpMouseX = 0, vpMouseY = 0;
+
+let channel    = 'avg';
+let inverted   = false;
+let normalized = false;
+let sampleRad  = 25;   // ±N image pixels averaged for intensity sampling
+let plotHeightExtra = 0; // extra px added to the base 1/3-viewport plot height
+let bgIntensity = null;   // array of per-x background values, or null if not set
+let bgIsLight   = false;  // true = LIGHT bg (invert both before subtract), false = DARK
+let forcedPeaks = [];     // array of { rf } objects forced by the user with F key
+const plotColors = { avg:'black', R:'red', G:'#006400', B:'#00008B' };
+
+// ═══════════════════════════════════════════════════════
+//  DOM refs
+// ═══════════════════════════════════════════════════════
+const $status   = document.getElementById('statusBar');
+const $main     = document.getElementById('mainArea');
+const $noImg    = document.getElementById('noImageMsg');
+const $tlc      = document.getElementById('tlcCanvas');
+const $marker   = document.getElementById('markerOverlay');
+const $xh       = document.getElementById('crosshairCanvas');
+const $hit      = document.getElementById('hitArea');
+const $plot     = document.getElementById('plotCanvas');
+const $banner   = document.getElementById('textBanner');
+const $bannerC  = document.getElementById('textBannerCanvas');
+const bannerCtx = $bannerC.getContext('2d');
+
+const tlcCtx    = $tlc.getContext('2d');
+const markerCtx = $marker.getContext('2d');
+const xhCtx     = $xh.getContext('2d');
+const plotCtx   = $plot.getContext('2d');
+
+// ═══════════════════════════════════════════════════════
+//  File open
+// ═══════════════════════════════════════════════════════
+document.getElementById('fileInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => loadImage(img);
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+  e.target.value = '';
+});
+
+// ═══════════════════════════════════════════════════════
+//  Drag & drop
+// ═══════════════════════════════════════════════════════
+const $dropOverlay = document.getElementById('dropOverlay');
+
+document.addEventListener('dragover', e => {
+  e.preventDefault();
+  $dropOverlay.classList.add('active');
+});
+
+document.addEventListener('dragleave', e => {
+  // Only hide when leaving the window entirely
+  if (e.relatedTarget === null) $dropOverlay.classList.remove('active');
+});
+
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  $dropOverlay.classList.remove('active');
+  const file = e.dataTransfer.files[0];
+  if (!file || !file.type.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const img = new Image();
+    img.onload = () => loadImage(img);
+    img.src = ev.target.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+function loadImage(img) {
+  sourceImg = img;
+  rotationAngle = 90; // default: rotate 90° CW on load
+  applyRotation();
+
+  startX = null; frontX = null; phase = 1;
+  bgIntensity = null; bgIsLight = false;
+  forcedPeaks = [];
+
+  // Invalidate text annotation
+  plotText = '';
+  $plotTextInput.value = '';
+  bannerHeight = 0;
+  $bannerC.width = 0; $bannerC.height = 0;
+  closeTextModal();
+
+  // Invalidate plot area
+  $plot.width  = window.innerWidth;
+  $plot.height = $plot.offsetHeight || Math.round(window.innerHeight / 3);
+  plotCtx.fillStyle = 'rgb(255,251,240)';
+  plotCtx.fillRect(0, 0, $plot.width, $plot.height);
+  plotCtx.font      = '13px "Share Tech Mono", monospace';
+  plotCtx.fillStyle = '#bbb';
+  plotCtx.textAlign = 'center';
+  plotCtx.fillText('Intensity plot will appear here', $plot.width / 2, $plot.height / 2);
+  plotCtx.textAlign = 'left';
+
+  $noImg.style.display = 'none';
+  $main.style.display  = 'block';
+  document.getElementById('resetBtn').style.display = 'inline-block';
+
+  renderImage();
+  setStatus('CLICK TO SET START LINE');
+}
+
+function applyRotation() {
+  if (!sourceImg) return;
+  const ow = sourceImg.width, oh = sourceImg.height;
+  const rad = rotationAngle * Math.PI / 180;
+
+  // Compute canvas size to fit rotated image proportionally
+  const absCos = Math.abs(Math.cos(rad));
+  const absSin = Math.abs(Math.sin(rad));
+  const cw = Math.round(ow * absCos + oh * absSin);
+  const ch = Math.round(ow * absSin + oh * absCos);
+
+  rotatedCanvas = document.createElement('canvas');
+  rotatedCanvas.width  = cw;
+  rotatedCanvas.height = ch;
+  const rc = rotatedCanvas.getContext('2d');
+  rc.save();
+  rc.translate(cw / 2, ch / 2);
+  rc.rotate(rad);
+  rc.drawImage(sourceImg, -ow / 2, -oh / 2);
+  rc.restore();
+  rotatedImgData = rc.getImageData(0, 0, cw, ch);
+}
+
+// ═══════════════════════════════════════════════════════
+//  Render image
+// ═══════════════════════════════════════════════════════
+function renderImage() {
+  if (!rotatedCanvas) return;
+  const rW = rotatedCanvas.width, rH = rotatedCanvas.height;
+  const dW = window.innerWidth;
+  displayScale = dW / rW;
+  const dH = Math.round(rH * displayScale);
+
+  $tlc.width    = dW; $tlc.height    = dH;
+  $marker.width = dW; $marker.height = dH;
+
+  tlcCtx.imageSmoothingEnabled = true;
+  tlcCtx.imageSmoothingQuality = 'high';
+  tlcCtx.drawImage(rotatedCanvas, 0, 0, rW, rH, 0, 0, dW, dH);
+
+  sizeCanvases();
+  drawMarkers();
+  drawCrosshair();
+}
+
+// ═══════════════════════════════════════════════════════
+//  Size fixed canvases / hit area
+// ═══════════════════════════════════════════════════════
+function sizeCanvases() {
+  const W          = window.innerWidth;
+  const TOTAL_BOT  = Math.round(window.innerHeight / 3);  // plot + banner = exactly 1/3
+  const PLOT_H     = Math.max(40, TOTAL_BOT - bannerHeight); // plot gets remainder
+  const fullH      = window.innerHeight - 44;              // below header
+  const imageH     = window.innerHeight - 44 - TOTAL_BOT;  // scrollable image zone = 2/3 minus header
+
+  // Crosshair canvas spans ALL the way down (image zone + plot zone)
+  $xh.width  = W;
+  $xh.height = fullH;
+  $xh.style.width  = W + 'px';
+  $xh.style.height = fullH + 'px';
+
+  // Hit area only covers the image zone (stops at banner top)
+  $hit.style.width  = W + 'px';
+  $hit.style.height = Math.max(0, imageH) + 'px';
+
+  // Position banner just above plot
+  $banner.style.bottom = PLOT_H + 'px';
+  $banner.style.height = bannerHeight + 'px';
+
+  // Update plotArea height dynamically
+  document.getElementById('plotArea').style.height = PLOT_H + 'px';
+}
+
+// ═══════════════════════════════════════════════════════
+//  Mouse events on hitArea
+// ═══════════════════════════════════════════════════════
+$hit.addEventListener('mousemove', e => {
+  vpMouseX = e.offsetX;
+  vpMouseY = e.offsetY;
+  drawCrosshair();
+  if (phase === 3 && vpMouseX >= startX && vpMouseX <= frontX) {
+    // docY: add header offset + scroll, vpMouseY is relative to hitArea top
+    drawPlot(vpMouseY + window.scrollY + 44);
+  }
+});
+
+$hit.addEventListener('mouseleave', () => {
+  // Don't clear — last crosshair stays visible
+});
+
+$hit.addEventListener('click', e => {
+  const dx = e.offsetX;
+  if (phase === 1) {
+    startX = dx; phase = 2;
+    drawMarkers();
+    setStatus('CLICK TO SET SOLVENT FRONT LINE');
+  } else if (phase === 2 && dx > startX) {
+    frontX = dx; phase = 3;
+    drawMarkers();
+    setStatus('RF READER ACTIVE  ·  R G B I N for plot options');
+  }
+  drawCrosshair();
+});
+
+// ═══════════════════════════════════════════════════════
+//  Marker overlay (scrolls with image)
+// ═══════════════════════════════════════════════════════
+function drawMarkers() {
+  markerCtx.clearRect(0, 0, $marker.width, $marker.height);
+  if (startX !== null) markerLine(startX, 'START');
+  if (frontX !== null) markerLine(frontX, 'FRONT');
+}
+
+function markerLine(x, label) {
+  const H = $marker.height;
+  markerCtx.save();
+  markerCtx.strokeStyle = '#ff2200';
+  markerCtx.lineWidth   = 2;
+  markerCtx.setLineDash([6, 3]);
+  markerCtx.beginPath();
+  markerCtx.moveTo(x, 0); markerCtx.lineTo(x, H);
+  markerCtx.stroke();
+  markerCtx.restore();
+  rotLabel(markerCtx, x + 4, 8, label, '#ff2200');
+}
+
+function rotLabel(ctx, x, y, text, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(Math.PI / 2);
+  ctx.font = 'bold 12px "Rajdhani", sans-serif';
+  const tw = ctx.measureText(text).width;
+  ctx.fillStyle = 'white';
+  ctx.fillRect(-2, -13, tw + 6, 16);
+  ctx.fillStyle = color;
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════
+//  Crosshair — drawn on full-height fixed canvas
+//  vpMouseY is relative to hitArea top (= 44px from page top)
+//  The crosshairCanvas also starts at 44px, so coordinates match directly.
+// ═══════════════════════════════════════════════════════
+function drawCrosshair() {
+  const W = $xh.width, H = $xh.height;
+  xhCtx.clearRect(0, 0, W, H);
+  const mx = vpMouseX, my = vpMouseY;
+
+  if (phase === 1 || phase === 2) {
+    // Red + yellow vertical guide — full canvas height (image + plot)
+    xhCtx.save();
+    xhCtx.strokeStyle = 'red'; xhCtx.lineWidth = 3;
+    xhCtx.beginPath(); xhCtx.moveTo(mx, 0); xhCtx.lineTo(mx, H); xhCtx.stroke();
+    xhCtx.strokeStyle = 'yellow'; xhCtx.lineWidth = 1;
+    xhCtx.beginPath(); xhCtx.moveTo(mx, 0); xhCtx.lineTo(mx, H); xhCtx.stroke();
+    xhCtx.restore();
+    rotLabel(xhCtx, mx + 4, 8, phase === 1 ? 'START' : 'FRONT', 'red');
+
+  } else if (phase >= 3) {
+    // Dark-blue crosshair — both lines run full canvas extent
+    xhCtx.save();
+    xhCtx.strokeStyle = '#00008B'; xhCtx.lineWidth = 1;
+    // Horizontal — full width
+    xhCtx.beginPath(); xhCtx.moveTo(0, my); xhCtx.lineTo(W, my); xhCtx.stroke();
+    // Vertical — full height (image + plot)
+    xhCtx.beginPath(); xhCtx.moveTo(mx, 0); xhCtx.lineTo(mx, H); xhCtx.stroke();
+    xhCtx.restore();
+
+    // Rf label when between markers
+    if (startX !== null && frontX !== null && mx >= startX && mx <= frontX) {
+      const rf  = ((mx - startX) / (frontX - startX)).toFixed(3);
+      const lbl = 'Rf= ' + rf;
+      xhCtx.save();
+      xhCtx.font = 'bold 13px "Share Tech Mono", monospace';
+      const tw = xhCtx.measureText(lbl).width;
+      let lx = mx + 8;
+      if (lx + tw + 8 > W) lx = mx - tw - 12;
+      const ly = my - 8;
+      xhCtx.fillStyle = 'white';
+      xhCtx.fillRect(lx - 2, ly - 14, tw + 6, 18);
+      xhCtx.fillStyle = 'red';
+      xhCtx.fillText(lbl, lx, ly);
+      xhCtx.restore();
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Intensity sampling (document-space coords)
+// ═══════════════════════════════════════════════════════
+function getIntensity(dispX, dispY) {
+  if (!rotatedImgData) return 0;
+  const rW = rotatedImgData.width, rH = rotatedImgData.height;
+  const ic  = Math.round(dispX / displayScale);
+  const ir  = Math.round((dispY - 44) / displayScale);  // subtract header offset
+  const rad = sampleRad;  // ±N image pixels
+
+  let sum = 0, cnt = 0;
+  for (let dr = -rad; dr <= rad; dr++) {
+    const r = ir + dr;
+    if (r < 0 || r >= rH) continue;
+    const c   = Math.max(0, Math.min(rW - 1, ic));
+    const idx = (r * rW + c) * 4;
+    const R = rotatedImgData.data[idx];
+    const G = rotatedImgData.data[idx + 1];
+    const B = rotatedImgData.data[idx + 2];
+    sum += channel === 'R' ? R : channel === 'G' ? G : channel === 'B' ? B : (R + G + B) / 3;
+    cnt++;
+  }
+  return cnt ? sum / cnt : 0;
+}
+
+// ═══════════════════════════════════════════════════════
+//  Savitzky-Golay
+// ═══════════════════════════════════════════════════════
+function sg(data, iters) {
+  let d = [...data];
+  for (let it = 0; it < iters; it++) {
+    const o = [...d];
+    for (let i = 2; i < d.length - 2; i++)
+      o[i] = (-3*d[i-2] + 12*d[i-1] + 17*d[i] + 12*d[i+1] - 3*d[i+2]) / 35;
+    d = o;
+  }
+  return d;
+}
+
+// ═══════════════════════════════════════════════════════
+//  Plot
+// ═══════════════════════════════════════════════════════
+function drawPlot(docY) {
+  if (!rotatedImgData || startX === null || frontX === null) return;
+
+  const pW   = window.innerWidth;
+  const cssH = $plot.offsetHeight;
+  $plot.width  = pW;
+  $plot.height = cssH;
+
+  const sx = Math.round(startX), fx = Math.round(frontX);
+  if (fx <= sx) return;
+
+  // Layout: strip in the plot is always 51 px tall regardless of sample size
+  const STRIP_H  = 51; // fixed display height in the plot area
+  const SEP      = 1;
+  const curveTop = STRIP_H + SEP;
+
+  // RAD in display pixels — used only for sampling the source canvas
+  const RAD      = Math.round(sampleRad * displayScale); // display pixels
+
+  // ── 1. Clear background ────────────────────────────────────────
+  plotCtx.fillStyle = 'rgb(255,251,240)';
+  plotCtx.fillRect(0, 0, pW, cssH);
+
+  // ── 2. Copy sample rows from display canvas, scale to fixed 51 px ─
+  // dispY = document Y of crosshair = docY - 44 (subtract header)
+  const dispY      = docY - 44;       // Y on the display canvas (no header offset)
+  const srcRowTop  = dispY - RAD;     // first row to copy from tlcCanvas
+  const srcHeight  = RAD * 2 + 1;    // actual number of rows sampled
+  const dispW      = fx - sx + 1;
+
+  // Read pixels straight from the rendered (stretched) tlcCanvas
+  const stripData = tlcCtx.getImageData(sx, srcRowTop, dispW, srcHeight);
+
+  const stripCanvas = document.createElement('canvas');
+  stripCanvas.width  = dispW;
+  stripCanvas.height = srcHeight;
+  stripCanvas.getContext('2d').putImageData(stripData, 0, 0);
+
+  // Draw scaled into plot — always 51 px tall
+  plotCtx.imageSmoothingEnabled = true;
+  plotCtx.imageSmoothingQuality = 'high';
+  plotCtx.drawImage(stripCanvas, sx, 0, dispW, STRIP_H);
+
+  // Crosshair centre line at vertical midpoint of the 51px strip
+  plotCtx.save();
+  plotCtx.strokeStyle = 'rgba(0,0,139,0.5)';
+  plotCtx.lineWidth   = 1;
+  plotCtx.setLineDash([4, 3]);
+  plotCtx.beginPath();
+  plotCtx.moveTo(sx, Math.floor(STRIP_H / 2));
+  plotCtx.lineTo(fx, Math.floor(STRIP_H / 2));
+  plotCtx.stroke();
+  plotCtx.restore();
+
+  // Thin separator line below strip
+  plotCtx.fillStyle = 'rgba(0,0,80,0.25)';
+  plotCtx.fillRect(0, STRIP_H, pW, SEP);
+
+  // ── 3. Sample intensity across start→front at current crosshair Y ───
+  // getIntensity averages ±25 image rows (the same 51-row strip shown above)
+  const raw = [];
+  for (let x = sx; x <= fx; x++) raw.push(getIntensity(x, docY));
+
+  // Background subtraction with light/dark awareness:
+  //
+  // DARK background: spots are brighter than BG → signal = raw - BG  (clamp ≥ 0)
+  //   Peaks point up wherever the lane is brighter than the stored baseline.
+  //
+  // LIGHT background: spots are darker than BG (they absorb) → both raw and BG
+  //   are inverted first (255 - v), then subtracted:
+  //   signal = (255 - raw) - (255 - BG) = BG - raw  (clamp ≥ 0)
+  //   Peaks point up wherever the lane is darker than the stored baseline.
+  let rawSub;
+  if (bgIntensity && bgIntensity.length === raw.length) {
+    if (bgIsLight) {
+      // LIGHT: invert both, then subtract
+      rawSub = raw.map((v, i) => Math.max(0, (255 - v) - (255 - bgIntensity[i])));
+    } else {
+      // DARK: subtract directly
+      rawSub = raw.map((v, i) => Math.max(0, v - bgIntensity[i]));
+    }
+  } else {
+    rawSub = raw;   // no background set — use as-is
+  }
+
+  let data = inverted ? rawSub.map(v => 255 - v) : rawSub.slice();
+  data = sg(data, 50);
+
+  const minV    = Math.min(...data), maxV = Math.max(...data);
+  const plotMax = normalized ? maxV : 255;
+  const padT    = curveTop + 6;
+  const plotH   = cssH - padT;
+
+  const pts = data.map((v, i) => ({
+    x: sx + i,
+    y: padT + (1 - (v - minV) / (plotMax - minV + 1e-6)) * plotH
+  }));
+
+  // ── 4. Gradient fill under curve ──────────────────────────────
+  const color = plotColors[channel];
+  const grad  = plotCtx.createLinearGradient(0, padT, 0, cssH);
+  grad.addColorStop(0,   toAlpha(color, 0.75));
+  grad.addColorStop(0.5, toAlpha(color, 0.30));
+  grad.addColorStop(1,   toAlpha(color, 0.15));
+
+  plotCtx.beginPath();
+  plotCtx.moveTo(pts[0].x, cssH);
+  plotCtx.lineTo(pts[0].x, pts[0].y);
+  pts.forEach(p => plotCtx.lineTo(p.x, p.y));
+  plotCtx.lineTo(pts[pts.length - 1].x, cssH);
+  plotCtx.closePath();
+  plotCtx.fillStyle = grad;
+  plotCtx.fill();
+
+  // ── 5. Curve line ─────────────────────────────────────────────
+  plotCtx.beginPath();
+  plotCtx.moveTo(pts[0].x, pts[0].y);
+  pts.forEach(p => plotCtx.lineTo(p.x, p.y));
+  plotCtx.strokeStyle = color;
+  plotCtx.lineWidth   = 1.5;
+  plotCtx.stroke();
+
+  // ── 6. Peak detection ─────────────────────────────────────────
+  // Find local maxima: point must be higher than neighbours within a window,
+  // and must exceed a minimum prominence relative to the data range.
+  const peaks = [];
+  const WIN        = 8;                          // half-window for local max check
+  const range      = maxV - minV;
+  const PROM_MIN   = range * 0.06;              // minimum prominence (6% of range)
+  const MIN_SEP    = Math.max(10, (fx - sx) * 0.04); // min pixels between peaks
+
+  for (let i = WIN; i < data.length - WIN; i++) {
+    const v = data[i];
+    let isMax = true;
+    for (let j = i - WIN; j <= i + WIN; j++) {
+      if (j !== i && data[j] >= v) { isMax = false; break; }
+    }
+    if (!isMax) continue;
+
+    // Prominence: min distance above surrounding valleys
+    let leftMin  = v, rightMin = v;
+    for (let j = i - 1; j >= 0;            j--) { leftMin  = Math.min(leftMin,  data[j]); if (data[j] > v) break; }
+    for (let j = i + 1; j < data.length;   j++) { rightMin = Math.min(rightMin, data[j]); if (data[j] > v) break; }
+    const prom = v - Math.max(leftMin, rightMin);
+    if (prom < PROM_MIN) continue;
+
+    peaks.push({ i, v, x: pts[i].x, y: pts[i].y });
+  }
+
+  // Merge peaks that are too close (keep the taller one)
+  const merged = [];
+  peaks.forEach(pk => {
+    const last = merged[merged.length - 1];
+    if (last && Math.abs(pk.x - last.x) < MIN_SEP) {
+      if (pk.v > last.v) merged[merged.length - 1] = pk;
+    } else {
+      merged.push(pk);
+    }
+  });
+
+  // Keep only the 10 highest peaks (by intensity value), then restore positional order
+  const top10 = merged
+    .slice()
+    .sort((a, b) => b.v - a.v)
+    .slice(0, 10)
+    .sort((a, b) => a.x - b.x);
+
+  // Draw peak markers — 14 pt font
+  const FONT_PT  = 14;
+  const FONT_PX  = Math.round(FONT_PT * 96 / 72); // 14pt -> ~19px at 96 dpi
+  const TICK_LEN = 12;
+  const LBL_GAP  = 4;  // gap between tick top and label bottom
+
+  plotCtx.save();
+  plotCtx.font = `bold ${FONT_PX}px "Share Tech Mono", monospace`;
+
+  // ── Helper: resolve horizontal label overlaps via iterative repulsion ──
+  // items: [{ anchorX, anchorY, tickTopY, lbl, color, bgColor, markerRadius }]
+  // Returns items with an added `labelX` (left edge of label rect) and `labelBaseY`.
+  function resolveLabels(items) {
+    const PAD = 3; // horizontal padding inside label box
+    const H   = FONT_PX + 2; // label box height
+
+    // Measure label widths and set initial centered positions
+    items.forEach(it => {
+      it.tw = plotCtx.measureText(it.lbl).width;
+      // Initial label center = anchor center, baseline just above tick top
+      it.labelCx  = it.anchorX;                          // center x (mutable)
+      it.labelBaseY = it.tickTopY - LBL_GAP;            // text baseline y
+    });
+
+    // Sort by anchorX so we process left-to-right
+    items.sort((a, b) => a.anchorX - b.anchorX);
+
+    // Iterative repulsion — push overlapping labels apart
+    const ITERS   = 60;
+    const LBL_PAD = 2; // extra gap between labels
+    for (let iter = 0; iter < ITERS; iter++) {
+      let moved = false;
+      for (let i = 0; i < items.length - 1; i++) {
+        const a = items[i], b = items[i + 1];
+        const aRight = a.labelCx + a.tw / 2 + PAD + LBL_PAD;
+        const bLeft  = b.labelCx - b.tw / 2 - PAD;
+        if (aRight > bLeft) {
+          const overlap = (aRight - bLeft) / 2;
+          a.labelCx -= overlap;
+          b.labelCx += overlap;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+
+    // Clamp to plot horizontal bounds
+    items.forEach(it => {
+      const halfW = it.tw / 2 + PAD;
+      it.labelCx = Math.max(sx + halfW, Math.min(fx - halfW, it.labelCx));
+      it.labelX  = Math.round(it.labelCx - it.tw / 2); // left edge for fillRect/fillText
+    });
+
+    return items;
+  }
+
+  // Build item list for auto-detected peaks
+  const autoItems = top10.map(pk => ({
+    anchorX:     pk.x,
+    anchorY:     pk.y,
+    tickTopY:    pk.y - 3 - TICK_LEN,
+    markerR:     3,
+    lbl:         'Rf=' + ((pk.x - sx) / (fx - sx)).toFixed(3),
+    color:       '#cc0000',
+    bgColor:     'rgba(255,255,255,0.92)',
+    isForced:    false,
+  }));
+
+  // Build item list for forced peaks
+  const forcedItems = forcedPeaks.map(fp => {
+    const px = sx + fp.rf * (fx - sx);
+    const di = Math.round(fp.rf * (data.length - 1));
+    const py = di >= 0 && di < pts.length ? pts[di].y : padT + plotH * 0.3;
+    return {
+      anchorX:  px,
+      anchorY:  py,
+      tickTopY: py - 5 - TICK_LEN,
+      markerR:  5,   // diamond half-size
+      lbl:      '★Rf=' + fp.rf.toFixed(3),
+      color:    '#7700cc',
+      bgColor:  'rgba(240,220,255,0.95)',
+      isForced: true,
+    };
+  });
+
+  // Resolve overlaps across ALL labels together (auto + forced share the same space)
+  const allItems = resolveLabels([...autoItems, ...forcedItems]);
+
+  // ── Draw markers first (dots/diamonds + ticks), then all labels on top ──
+  // Pass 1: markers and ticks
+  allItems.forEach(it => {
+    if (it.isForced) {
+      // Diamond marker
+      plotCtx.fillStyle = it.color;
+      plotCtx.beginPath();
+      plotCtx.moveTo(it.anchorX, it.anchorY - 5);
+      plotCtx.lineTo(it.anchorX + 4, it.anchorY);
+      plotCtx.lineTo(it.anchorX, it.anchorY + 5);
+      plotCtx.lineTo(it.anchorX - 4, it.anchorY);
+      plotCtx.closePath();
+      plotCtx.fill();
+      // Tick from diamond top to tick top
+      plotCtx.strokeStyle = it.color;
+      plotCtx.lineWidth   = 1.5;
+      plotCtx.setLineDash([]);
+      plotCtx.beginPath();
+      plotCtx.moveTo(it.anchorX, it.anchorY - 5);
+      plotCtx.lineTo(it.anchorX, it.tickTopY);
+      plotCtx.stroke();
+    } else {
+      // Circle marker
+      plotCtx.fillStyle = it.color;
+      plotCtx.beginPath();
+      plotCtx.arc(it.anchorX, it.anchorY, 3, 0, Math.PI * 2);
+      plotCtx.fill();
+      // Tick from circle top to tick top
+      plotCtx.strokeStyle = it.color;
+      plotCtx.lineWidth   = 1;
+      plotCtx.setLineDash([]);
+      plotCtx.beginPath();
+      plotCtx.moveTo(it.anchorX, it.anchorY - 3);
+      plotCtx.lineTo(it.anchorX, it.tickTopY);
+      plotCtx.stroke();
+    }
+  });
+
+  // Pass 2: leader lines (from label bottom-center to tick top), then labels
+  allItems.forEach(it => {
+    const PAD      = 3;
+    const H        = FONT_PX + 2;
+    const labelBot = it.labelBaseY + 2;           // bottom of the label box
+    const labelMidX = it.labelX + it.tw / 2;     // center of label horizontally
+
+    // Leader line: from tick top up to label bottom center
+    // Only draw if the label has moved away from directly above the anchor
+    const drift = Math.abs(labelMidX - it.anchorX);
+    if (drift > 2) {
+      plotCtx.save();
+      plotCtx.strokeStyle = it.color;
+      plotCtx.lineWidth   = 0.8;
+      plotCtx.setLineDash([2, 2]);
+      plotCtx.globalAlpha = 0.65;
+      plotCtx.beginPath();
+      plotCtx.moveTo(it.anchorX, it.tickTopY);
+      plotCtx.lineTo(labelMidX, labelBot);
+      plotCtx.stroke();
+      plotCtx.restore();
+    }
+
+    // Background pill
+    plotCtx.fillStyle = it.bgColor;
+    plotCtx.fillRect(it.labelX - PAD, it.labelBaseY - FONT_PX, it.tw + PAD * 2, H);
+
+    // Text
+    plotCtx.fillStyle = it.color;
+    plotCtx.fillText(it.lbl, it.labelX, it.labelBaseY);
+  });
+
+  plotCtx.restore();
+
+  // ── 7. START / FRONT alignment markers (full height) ──────────
+  plotCtx.save();
+  plotCtx.strokeStyle = 'rgba(200,0,0,0.5)';
+  plotCtx.lineWidth   = 1;
+  plotCtx.setLineDash([4, 3]);
+  [sx, fx].forEach(x => {
+    plotCtx.beginPath();
+    plotCtx.moveTo(x, 0); plotCtx.lineTo(x, cssH); plotCtx.stroke();
+  });
+  plotCtx.restore();
+
+  // ── 8. BG-subtraction indicator + zero baseline ───────────────
+  if (bgIntensity) {
+    // Zero-baseline: where BG-subtracted value = 0 maps to on the plot
+    // (it is always at the bottom of the plotH region since minV = 0 after clamping)
+    const zeroY = padT + plotH;   // bottom of the plot area = zero line
+
+    // Dashed orange zero-baseline across the lane
+    plotCtx.save();
+    plotCtx.strokeStyle = 'rgba(192, 80, 0, 0.55)';
+    plotCtx.lineWidth   = 1;
+    plotCtx.setLineDash([5, 4]);
+    plotCtx.beginPath();
+    plotCtx.moveTo(sx, zeroY);
+    plotCtx.lineTo(fx, zeroY);
+    plotCtx.stroke();
+    plotCtx.restore();
+
+    // Label badge top-right of plot area
+    plotCtx.save();
+    const lbl = bgIsLight ? '▶ BG LIGHT · SUBTRACTED' : '▶ BG DARK · SUBTRACTED';
+    plotCtx.font = 'bold 11px "Share Tech Mono", monospace';
+    const tw = plotCtx.measureText(lbl).width;
+    const lx = pW - tw - 14;
+    const ly = padT + 4;
+    plotCtx.fillStyle = 'rgba(255, 248, 235, 0.92)';
+    plotCtx.fillRect(lx - 4, ly - 1, tw + 8, 16);
+    plotCtx.fillStyle = '#c05000';
+    plotCtx.textBaseline = 'top';
+    plotCtx.fillText(lbl, lx, ly);
+    plotCtx.restore();
+  }
+
+  // ── 9. Overlay committed annotation text (banner only) ────────
+  // (text lives in the separate banner canvas above the plot)
+}
+
+function toAlpha(color, a) {
+  return ({ black:`rgba(0,0,0,${a})`, red:`rgba(220,0,0,${a})`,
+            '#006400':`rgba(0,100,0,${a})`, '#00008B':`rgba(0,0,139,${a})` })[color]
+         || `rgba(0,0,0,${a})`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  Export plot as PNG
+// ═══════════════════════════════════════════════════════
+function exportPlot() {
+  // Composite: text banner (if visible) stacked above the plot canvas
+  const plotW = $plot.width  || window.innerWidth;
+  const plotH = $plot.height || $plot.offsetHeight;
+  const bH    = bannerHeight; // 0 when no text has been set
+
+  const totalH = bH + plotH;
+  const out    = document.createElement('canvas');
+  out.width    = plotW;
+  out.height   = totalH;
+  const ctx    = out.getContext('2d');
+
+  // Fill background (same cream as the plot)
+  ctx.fillStyle = 'rgb(255, 251, 240)';
+  ctx.fillRect(0, 0, plotW, totalH);
+
+  // Draw banner on top (if it has content)
+  if (bH > 0) {
+    // $bannerC is the banner canvas element
+    ctx.drawImage($bannerC, 0, 0, plotW, bH);
+  }
+
+  // Draw plot below banner
+  ctx.drawImage($plot, 0, bH, plotW, plotH);
+
+  const a = document.createElement('a');
+  a.download = 'TLC_plot.png';
+  a.href = out.toDataURL('image/png');
+  a.click();
+}
+
+// ═══════════════════════════════════════════════════════
+//  Text modal logic
+// ═══════════════════════════════════════════════════════
+const $textBackdrop  = document.getElementById('textModalBackdrop');
+const $textYes       = document.getElementById('textModalYes');
+const $textNo        = document.getElementById('textModalNo');
+const $textInputArea = document.getElementById('textInputArea');
+const $plotTextInput = document.getElementById('plotTextInput');
+
+function openTextModal() {
+  // Reset to question phase each time T opens it fresh
+  $textInputArea.style.display = 'none';
+  $textBackdrop.classList.add('active');
+  textModalState = 'question';
+}
+
+function closeTextModal() {
+  $textBackdrop.classList.remove('active');
+  textModalState = 'closed';
+}
+
+$textNo.addEventListener('click', () => closeTextModal());
+
+$textYes.addEventListener('click', () => {
+  $textInputArea.style.display = 'block';
+  $plotTextInput.focus();
+  textModalState = 'input';
+});
+
+// Ctrl+Enter inside textarea → commit text and render in banner
+$plotTextInput.addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    plotText = $plotTextInput.value;
+    closeTextModal();
+    if (plotText.trim()) {
+      drawPlotText();
+      setStatus('TEXT RENDERED IN BANNER  ·  Press T to update');
+    }
+  }
+});
+
+// ═══════════════════════════════════════════════════════
+//  Word-wrap helper: break text into lines <= maxWidth px
+// ═══════════════════════════════════════════════════════
+function wrapWords(ctx, text, maxWidth) {
+  const output = [];
+  // Honour explicit newlines first
+  text.split('\n').forEach(paragraph => {
+    const words = paragraph.split(' ');
+    let line = '';
+    words.forEach(word => {
+      const test = line ? line + ' ' + word : word;
+      if (ctx.measureText(test).width <= maxWidth) {
+        line = test;
+      } else {
+        if (line) output.push(line);
+        // If a single word is too wide, push it anyway
+        line = word;
+      }
+    });
+    if (line) output.push(line);
+  });
+  return output;
+}
+
+// ═══════════════════════════════════════════════════════
+//  Render committed text into the banner above the plot
+//  Banner starts at 50 px and expands if the text needs more room.
+// ═══════════════════════════════════════════════════════
+function drawPlotText() {
+  if (!plotText.trim()) return;
+
+  const W        = window.innerWidth;
+  const FONT_SIZE = 16;          // fixed readable font size (px)
+  const LINE_H   = FONT_SIZE * 1.45;
+  const PAD_X    = 8;
+  const PAD_Y    = 6;
+  const maxTextW = W - PAD_X * 2;
+
+  // Measure wrapped lines using a temp context measurement
+  bannerCtx.font = `bold ${FONT_SIZE}px "Share Tech Mono", monospace`;
+  const wrappedLines = wrapWords(bannerCtx, plotText.trim(), maxTextW);
+
+  // Compute required height; minimum 50 px
+  const neededH = Math.max(50, Math.ceil(PAD_Y + wrappedLines.length * LINE_H + PAD_Y));
+
+  // Update banner height & reposition elements if needed
+  if (neededH !== bannerHeight) {
+    bannerHeight = neededH;
+    sizeCanvases();
+  }
+
+  // Size the canvas to the banner
+  $bannerC.width  = W;
+  $bannerC.height = bannerHeight;
+
+  // ── White-out ──────────────────────────────────────────────────────
+  bannerCtx.fillStyle = 'rgb(255, 251, 240)';
+  bannerCtx.fillRect(0, 0, W, bannerHeight);
+
+  // ── Render text top-aligned ────────────────────────────────────────
+  bannerCtx.save();
+  bannerCtx.font      = `bold ${FONT_SIZE}px "Share Tech Mono", monospace`;
+  bannerCtx.fillStyle = '#1a1a2e';
+  bannerCtx.textAlign = 'left';
+  bannerCtx.textBaseline = 'top';
+  wrappedLines.forEach((line, i) => {
+    bannerCtx.fillText(line, PAD_X, PAD_Y + i * LINE_H);
+  });
+  bannerCtx.restore();
+}
+
+// ═══════════════════════════════════════════════════════
+//  BG modal logic
+// ═══════════════════════════════════════════════════════
+const $bgBackdrop = document.getElementById('bgModalBackdrop');
+const $bgLightBtn = document.getElementById('bgLightBtn');
+const $bgDarkBtn  = document.getElementById('bgDarkBtn');
+
+// Snapshot Y is captured when the modal opens so that moving the mouse
+// while the dialog is open does not change the sampled position.
+let bgPendingDocY = 0;
+
+function openBgModal() {
+  // Freeze the current crosshair Y as the BG sample position
+  bgPendingDocY = vpMouseY + window.scrollY + 44;
+  $bgBackdrop.classList.add('active');
+}
+
+function closeBgModal() {
+  $bgBackdrop.classList.remove('active');
+}
+
+function commitBg(isLight) {
+  closeBgModal();
+  bgIsLight = isLight;
+  const sx2 = Math.round(startX), fx2 = Math.round(frontX);
+  bgIntensity = [];
+  for (let x = sx2; x <= fx2; x++) {
+    bgIntensity.push(getIntensity(x, bgPendingDocY));
+  }
+  const ch2  = { avg:'AVG', R:'RED', G:'GREEN', B:'BLUE' };
+  const type = isLight ? 'LIGHT' : 'DARK';
+  setStatus(`BG ${type} SET  ·  CH:${ch2[channel]} · INV:${inverted?'ON':'OFF'} · NORM:${normalized?'ON':'OFF'}  [Ctrl+H clears]`);
+  // Redraw at the same frozen Y so the BG-subtracted curve appears immediately
+  drawPlot(bgPendingDocY);
+}
+
+$bgLightBtn.addEventListener('click', () => commitBg(true));
+$bgDarkBtn.addEventListener('click',  () => commitBg(false));
+
+// ═══════════════════════════════════════════════════════
+//  Keyboard
+// ═══════════════════════════════════════════════════════
+document.addEventListener('keydown', e => {
+  const k = e.key;
+
+  // Ctrl+X — close the application
+  if ((e.ctrlKey || e.metaKey) && k.toUpperCase() === 'X') {
+    e.preventDefault();
+    window.close();
+    return;
+  }
+
+  // F — force-assign a peak at current Rf; Ctrl+F — clear all forced peaks
+  if (k.toUpperCase() === 'F') {
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+F: invalidate all forced peaks
+      e.preventDefault();
+      forcedPeaks = [];
+      if (phase === 3) drawPlot(vpMouseY + window.scrollY + 44);
+      setStatus('FORCED PEAKS CLEARED');
+    } else {
+      // F: force a peak at current crosshair Rf
+      if (phase !== 3 || startX === null || frontX === null) {
+        setStatus('Set START and FRONT first, then press F to force a peak');
+        return;
+      }
+      if (vpMouseX < startX || vpMouseX > frontX) {
+        setStatus('Crosshair must be between START and FRONT to force a peak');
+        return;
+      }
+      const rf = ((vpMouseX - startX) / (frontX - startX));
+      // Avoid duplicate (within ±0.005 Rf)
+      const already = forcedPeaks.some(p => Math.abs(p.rf - rf) < 0.005);
+      if (!already) {
+        forcedPeaks.push({ rf });
+        forcedPeaks.sort((a, b) => a.rf - b.rf);
+      }
+      if (phase === 3) drawPlot(vpMouseY + window.scrollY + 44);
+      setStatus(`FORCED PEAK  Rf=${rf.toFixed(3)}  ·  ${forcedPeaks.length} forced  ·  Ctrl+F=clear all`);
+    }
+    return;
+  }
+
+  // O — open image (works even without an image loaded)
+  if (k.toUpperCase() === 'O') {
+    document.getElementById('fileInput').click();
+    return;
+  }
+
+  // Arrow keys — rotate (require image)
+  if (k === 'ArrowRight' || k === 'ArrowLeft') {
+    if (!sourceImg) return;
+    e.preventDefault();
+    rotationAngle = (rotationAngle + (k === 'ArrowRight' ? 90 : -90) + 360) % 360;
+    applyRotation();
+    // Reset markers when rotating
+    startX = null; frontX = null; phase = 1;
+    bgIntensity = null; bgIsLight = false;
+    renderImage();
+    setStatus(`ROT:${rotationAngle}°  ·  CLICK TO SET START LINE`);
+    return;
+  }
+
+  // Y / N — answer the text modal question when it is open
+  if (textModalState === 'question') {
+    if (k.toUpperCase() === 'Y') {
+      e.preventDefault();
+      $textInputArea.style.display = 'block';
+      $plotTextInput.focus();
+      textModalState = 'input';
+      return;
+    }
+    if (k.toUpperCase() === 'N') {
+      e.preventDefault();
+      closeTextModal();
+      return;
+    }
+  }
+
+  // T — text annotation; Ctrl+T — invalidate/clear text
+  if (k.toUpperCase() === 'T') {
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+T: clear text box and banner
+      plotText = '';
+      $plotTextInput.value = '';
+      bannerHeight = 0;
+      $bannerC.width = 0; $bannerC.height = 0;
+      sizeCanvases();
+      closeTextModal();
+      setStatus('TEXT CLEARED');
+      return;
+    }
+    if (textModalState === 'closed') {
+      // First T press: open the modal dialog
+      openTextModal();
+      return;
+    }
+    if (textModalState === 'input') {
+      // Second T press (while input is open): commit text and render
+      plotText = $plotTextInput.value;
+      closeTextModal();
+      if (plotText.trim()) {
+        drawPlotText();
+        setStatus('TEXT RENDERED IN PLOT  ·  Press T to update');
+      }
+      return;
+    }
+    return;
+  }
+  if (!rotatedImgData) return;
+  const ku = k.toUpperCase();
+
+  // L — widen sample; Ctrl+L — narrow sample
+  if (ku === 'L') {
+    if (e.ctrlKey || e.metaKey) {
+      sampleRad = Math.max(1, sampleRad - 25);
+    } else {
+      sampleRad += 25;
+    }
+    sizeCanvases();
+    setStatus(`SAMPLE WIDTH: ±${sampleRad} px  ·  L=wider · Ctrl+L=narrower`);
+    if (phase === 3) drawPlot(vpMouseY + window.scrollY + 44);
+    return;
+  }
+
+  // H — open BG-type dialog; Ctrl+H — invalidate the stored background
+  if (ku === 'H') {
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+H: clear background
+      bgIntensity = null;
+      bgIsLight   = false;
+      const ch2 = { avg:'AVG', R:'RED', G:'GREEN', B:'BLUE' };
+      setStatus(`BG CLEARED  ·  CH:${ch2[channel]} · INV:${inverted?'ON':'OFF'} · NORM:${normalized?'ON':'OFF'}`);
+      if (phase === 3) drawPlot(vpMouseY + window.scrollY + 44);
+    } else {
+      // H: validate position then open the LIGHT / DARK dialog
+      if (phase !== 3 || startX === null || frontX === null) {
+        setStatus('Position crosshair in the lane first, then press H');
+        return;
+      }
+      openBgModal();
+    }
+    return;
+  }
+
+  if      (ku==='R') { channel = channel === 'R' ? 'avg' : 'R'; bgIntensity = null; bgIsLight = false; }
+  else if (ku==='G') { channel = channel === 'G' ? 'avg' : 'G'; bgIntensity = null; bgIsLight = false; }
+  else if (ku==='B') { channel = channel === 'B' ? 'avg' : 'B'; bgIntensity = null; bgIsLight = false; }
+  else if (ku==='I') inverted   = !inverted;
+  else if (ku==='N') normalized = !normalized;
+  else if (ku==='C') { exportPlot(); return; }
+  else return;
+  const ch = { avg:'AVG', R:'RED', G:'GREEN', B:'BLUE' };
+  setStatus(`CH:${ch[channel]} · INV:${inverted?'ON':'OFF'} · NORM:${normalized?'ON':'OFF'}${bgIntensity ? '' : ''}`);
+  if (phase === 3) drawPlot(vpMouseY + window.scrollY + 44);
+});
+
+// ═══════════════════════════════════════════════════════
+//  Resize / Scroll
+// ═══════════════════════════════════════════════════════
+window.addEventListener('resize', () => {
+  sizeCanvases();
+  if (rotatedCanvas) renderImage();
+});
+
+window.addEventListener('scroll', () => {
+  drawCrosshair();
+  if (phase === 3 && vpMouseX >= startX && vpMouseX <= frontX) {
+    drawPlot(vpMouseY + window.scrollY + 44);
+  }
+}, { passive: true });
+
+// ═══════════════════════════════════════════════════════
+//  Init
+// ═══════════════════════════════════════════════════════
+function resetMarkers() {
+  if (!rotatedCanvas) return;
+  startX = null; frontX = null; phase = 1;
+  bgIntensity = null; bgIsLight = false;
+  forcedPeaks = [];
+  drawMarkers();
+  drawCrosshair();
+  // Clear plot
+  $plot.width  = window.innerWidth;
+  $plot.height = $plot.offsetHeight;
+  plotCtx.fillStyle = 'rgb(255,251,240)';
+  plotCtx.fillRect(0, 0, $plot.width, $plot.height);
+  plotCtx.font      = '13px "Share Tech Mono", monospace';
+  plotCtx.fillStyle = '#bbb';
+  plotCtx.textAlign = 'center';
+  plotCtx.fillText('Intensity plot will appear here', $plot.width/2, $plot.height/2);
+  plotCtx.textAlign = 'left';
+  setStatus('CLICK TO SET START LINE');
+}
+
+function setStatus(m) { $status.textContent = m; }
+
+(function init() {
+  sizeCanvases();
+  const PLOT_H = Math.round(window.innerHeight / 3);
+  $plot.width  = window.innerWidth;
+  $plot.height = $plot.offsetHeight || PLOT_H;
+  plotCtx.fillStyle = 'rgb(255,251,240)';
+  plotCtx.fillRect(0, 0, $plot.width, $plot.height);
+  plotCtx.font      = '13px "Share Tech Mono", monospace';
+  plotCtx.fillStyle = '#bbb';
+  plotCtx.textAlign = 'center';
+  plotCtx.fillText('Intensity plot will appear here', $plot.width/2, $plot.height/2);
+  plotCtx.textAlign = 'left';
+})();
+</script>
+</body>
+</html>
