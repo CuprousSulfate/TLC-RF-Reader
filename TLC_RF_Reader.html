@@ -889,16 +889,27 @@ function drawPlot(docY) {
   const minV    = Math.min(...data), maxV = Math.max(...data);
   const plotMax = normalized ? maxV : 255;
   const padT    = curveTop + 6;
-  const plotH   = cssH - padT;
+
+  // Reserve 2 × label-height at the top of the curve zone so the tallest
+  // peak apex — and its label + tick above it — never overlap the image strip.
+  // LBL_H = FONT_PX + 2  (label box height, same value used when drawing labels)
+  const FONT_PT  = 14;
+  const FONT_PX  = Math.round(FONT_PT * 96 / 72); // ≈19 px
+  const LBL_H    = FONT_PX + 2;                    // label box height
+  const GUARD    = 2 * LBL_H;                      // reserved gap above apex
+
+  // curveTop0: the y where the tallest peak apex is allowed to sit
+  const curveTop0 = padT + GUARD;
+  const plotH     = cssH - curveTop0;               // remaining height for the curve
 
   const pts = data.map((v, i) => ({
     x: sx + i,
-    y: padT + (1 - (v - minV) / (plotMax - minV + 1e-6)) * plotH
+    y: curveTop0 + (1 - (v - minV) / (plotMax - minV + 1e-6)) * plotH
   }));
 
   // ── 4. Gradient fill under curve ──────────────────────────────
   const color = plotColors[channel];
-  const grad  = plotCtx.createLinearGradient(0, padT, 0, cssH);
+  const grad  = plotCtx.createLinearGradient(0, curveTop0, 0, cssH);
   grad.addColorStop(0,   toAlpha(color, 0.75));
   grad.addColorStop(0.5, toAlpha(color, 0.30));
   grad.addColorStop(1,   toAlpha(color, 0.15));
@@ -965,9 +976,7 @@ function drawPlot(docY) {
     .slice(0, 10)
     .sort((a, b) => a.x - b.x);
 
-  // Draw peak markers — 14 pt font
-  const FONT_PT  = 14;
-  const FONT_PX  = Math.round(FONT_PT * 96 / 72); // 14pt -> ~19px at 96 dpi
+  // Draw peak markers
   const TICK_LEN = 12;
   const LBL_GAP  = 4;  // gap between tick top and label bottom
 
@@ -1037,7 +1046,7 @@ function drawPlot(docY) {
   const forcedItems = forcedPeaks.map(fp => {
     const px = sx + fp.rf * (fx - sx);
     const di = Math.round(fp.rf * (data.length - 1));
-    const py = di >= 0 && di < pts.length ? pts[di].y : padT + plotH * 0.3;
+    const py = di >= 0 && di < pts.length ? pts[di].y : curveTop0 + plotH * 0.3;
     return {
       anchorX:  px,
       anchorY:  py,
@@ -1140,7 +1149,7 @@ function drawPlot(docY) {
   if (bgIntensity) {
     // Zero-baseline: where BG-subtracted value = 0 maps to on the plot
     // (it is always at the bottom of the plotH region since minV = 0 after clamping)
-    const zeroY = padT + plotH;   // bottom of the plot area = zero line
+    const zeroY = curveTop0 + plotH;   // bottom of the plot area = zero line
 
     // Dashed orange zero-baseline across the lane
     plotCtx.save();
@@ -1159,7 +1168,7 @@ function drawPlot(docY) {
     plotCtx.font = 'bold 11px "Share Tech Mono", monospace';
     const tw = plotCtx.measureText(lbl).width;
     const lx = pW - tw - 14;
-    const ly = padT + 4;
+    const ly = curveTop0 + 4;
     plotCtx.fillStyle = 'rgba(255, 248, 235, 0.92)';
     plotCtx.fillRect(lx - 4, ly - 1, tw + 8, 16);
     plotCtx.fillStyle = '#c05000';
@@ -1182,6 +1191,22 @@ function toAlpha(color, a) {
 //  Export plot as PNG
 // ═══════════════════════════════════════════════════════
 function exportPlot() {
+  // Build timestamp: YYYYMMDD_HHMMSS
+  const now = new Date();
+  const ts  = now.getFullYear().toString()
+    + String(now.getMonth() + 1).padStart(2, '0')
+    + String(now.getDate()).padStart(2, '0')
+    + '_'
+    + String(now.getHours()).padStart(2, '0')
+    + String(now.getMinutes()).padStart(2, '0')
+    + String(now.getSeconds()).padStart(2, '0');
+
+  // Prompt for base name; cancel aborts the export
+  const base = window.prompt('Export filename (timestamp will be appended):', 'TLC_plot');
+  if (base === null) return;
+  const safe     = (base.trim() || 'TLC_plot').replace(/[\\/:*?"<>|]/g, '_');
+  const filename = `${safe}_${ts}.png`;
+
   // Composite: text banner (if visible) stacked above the plot canvas
   const plotW = $plot.width  || window.innerWidth;
   const plotH = $plot.height || $plot.offsetHeight;
@@ -1199,7 +1224,6 @@ function exportPlot() {
 
   // Draw banner on top (if it has content)
   if (bH > 0) {
-    // $bannerC is the banner canvas element
     ctx.drawImage($bannerC, 0, 0, plotW, bH);
   }
 
@@ -1207,7 +1231,7 @@ function exportPlot() {
   ctx.drawImage($plot, 0, bH, plotW, plotH);
 
   const a = document.createElement('a');
-  a.download = 'TLC_plot.png';
+  a.download = filename;
   a.href = out.toDataURL('image/png');
   a.click();
 }
